@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  still_alive:
+    build: .
+    container_name: still_alive_app
+    ports:
+      - "${STREAMLIT_PORT:-8501}:8501"
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8501/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+    restart: unless-stopped

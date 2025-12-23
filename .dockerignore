@@ -1,0 +1,12 @@
+venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+.env
+.git
+.gitignore
+node_modules
+still_alive.db
+.env.local

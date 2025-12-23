@@ -1,0 +1,11 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+venv/
+.env
+
+# Streamlit secrets and Database
+.streamlit/secrets.toml
+still_alive.db
