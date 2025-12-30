@@ -120,6 +120,37 @@ def get_all_checkins():
     conn.close()
     return results
 
+def verify_login(username, password):
+    """Verify username and password against database"""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('SELECT password FROM users WHERE username = ?', (username,))
+    result = c.fetchone()
+    conn.close()
+    if result and result[0] == password:
+        return True
+    return False
+
+def update_user_settings(username, password=None, color=None):
+    """Update user password or color"""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    if password:
+        c.execute('UPDATE users SET password = ? WHERE username = ?', (password, username))
+    if color:
+        c.execute('UPDATE users SET color = ? WHERE username = ?', (color, username))
+    conn.commit()
+    conn.close()
+
+def get_user_colors():
+    """Fetch user colors from database"""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('SELECT username, color FROM users')
+    results = c.fetchall()
+    conn.close()
+    return {row[0]: (row[1] if row[1] else "#888888") for row in results}
+
 # Initialize database
 init_db()
 
@@ -129,11 +160,22 @@ if not st.session_state.logged_in:
     
     with col1:
         st.subheader("Login")
-        username = st.selectbox("Select your name:", ["You", "Brother"])
+        
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        c.execute('SELECT username FROM users')
+        users = [row[0] for row in c.fetchall()]
+        conn.close()
+        
+        username = st.selectbox("Select your name:", users if users else ["erik", "mark"])
+        password = st.text_input("Password", type="password")
         if st.button("Login"):
-            st.session_state.logged_in = True
-            st.session_state.username = username
-            st.rerun()
+            if verify_login(username, password):
+                st.session_state.logged_in = True
+                st.session_state.username = username
+                st.rerun()
+            else:
+                st.error("Incorrect password")
 else:
     # Main App header in compact form
     col_welcome, col_logout = st.columns([4, 1])
@@ -145,6 +187,44 @@ else:
             st.session_state.username = None
             st.rerun()
 
+    # Writable single-line check-in form
+    # Swapped checkbox and message field order
+    col_date, col_chk, col_msg, col_submit = st.columns([3, 2, 3, 2], gap="small")
+    
+    with col_date:
+        form_date = st.date_input("Date", key="form_date_picker", label_visibility="collapsed")
+        
+        # Fetch existing message for selected date and user
+        existing_msg = ""
+        existing_activity = get_day_checkins(form_date.day, form_date.year, form_date.month)
+        for user, activity in existing_activity:
+            if user == st.session_state.username:
+                existing_msg = activity if activity else ""
+                break
+    
+    with col_chk:
+        form_alive = st.checkbox("I'm alive", key=f"alive_{form_date}")
+
+    with col_msg:
+        form_msg = st.text_input("Message", value=existing_msg, placeholder="Message (optional)", label_visibility="collapsed", key=f"msg_{form_date}")
+
+    with col_submit:
+        submitted = st.button("Save", use_container_width=True)
+
+    if submitted:
+        # If user unchecked 'I'm alive' treat as deletion of check-in
+        if form_alive:
+            check_in(form_date.day, st.session_state.username, form_date.year, form_date.month, form_msg)
+            st.success(f"Saved check-in for {form_date.strftime('%Y-%m-%d')}")
+        else:
+            # Remove existing check-in for this user/date if exists
+            conn = sqlite3.connect(DB_FILE)
+            c = conn.cursor()
+            c.execute('DELETE FROM checkins WHERE date = ? AND username = ?', (form_date.strftime('%Y-%m-%d'), st.session_state.username))
+            conn.commit()
+            conn.close()
+            st.info(f"Removed check-in for {form_date.strftime('%Y-%m-%d')}")
+
     now = datetime.now()
     year = now.year
     month = now.month
@@ -153,10 +233,7 @@ else:
     checkins = get_month_checkins(year, month)
     
     # Color mapping for users
-    user_colors = {
-        "You": "#FF6B6B",
-        "Brother": "#4ECDC4"
-    }
+    user_colors = get_user_colors()
 
     events = []
     for day, users in checkins.items():
@@ -174,9 +251,9 @@ else:
         st.session_state.calendar_options = {
             "initialView": "dayGridMonth",
             "headerToolbar": {
-                "left": "prev,next prevYear,nextYear today",
+                "left": "prev,next",
                 "center": "title",
-                "right": ""
+                "right": "today"
             },
             "selectable": False,
             "editable": False,
@@ -192,7 +269,7 @@ else:
 
     with col_cal:
         # Legend
-        st.markdown(f"<div>Legend: <span style='color:{user_colors['You']}'>●</span> You &nbsp;&nbsp; <span style='color:{user_colors['Brother']}'>●</span> Brother</div>", unsafe_allow_html=True)
+        st.markdown(f"<div>Legend: <span style='color:{user_colors.get('erik', '#FF6B6B')}'>●</span> Erik &nbsp;&nbsp; <span style='color:{user_colors.get('mark', '#4ECDC4')}'>●</span> Mark</div>", unsafe_allow_html=True)
         try:
             # Limit callbacks to prevent 'eventsSet' from triggering infinite reruns
             st_calendar(
@@ -204,52 +281,17 @@ else:
         except Exception:
             st.info("Streamlit calendar not available — showing the styled grid above instead.")
 
-    st.markdown("---")
-
-    # Writable single-line check-in form
-    col_date, col_form = st.columns([1, 3])
-    
-    with col_date:
-        # Date picker outside form so it triggers re-run
-        # Remove the `value` argument. The `key` will preserve the state across reruns,
-        # and the widget will correctly default to today's date on the first load.
-        form_date = st.date_input("Date", key="form_date_picker")
-        
-        # Fetch existing message for selected date and user
-        existing_msg = ""
-        existing_activity = get_day_checkins(form_date.day, form_date.year, form_date.month)
-        for user, activity in existing_activity:
-            if user == st.session_state.username:
-                existing_msg = activity if activity else ""
-                break
-    
-    with col_form:
-        # Form for message and submission
-        with st.form(key="quick_checkin", clear_on_submit=False):
-            # Message input inside form
-            form_msg = st.text_input("Message (optional)", value=existing_msg)
-
-            col_chk, col_submit = st.columns([1, 1])
-            with col_chk:
-                # The hardcoded `value=True` was a primary cause of the infinite loop
-                # as it fought with Streamlit's state management. Removing it allows
-                # the widget to behave correctly, defaulting to unchecked.
-                form_alive = st.checkbox("I'm alive")
-            with col_submit:
-                submitted = st.form_submit_button("Save", use_container_width=True)
-
-    if submitted:
-        # If user unchecked 'I'm alive' treat as deletion of check-in
-        if form_alive:
-            check_in(form_date.day, st.session_state.username, form_date.year, form_date.month, form_msg)
-            st.success(f"Saved check-in for {form_date.strftime('%Y-%m-%d')}")
-        else:
-            # Remove existing check-in for this user/date if exists
-            conn = sqlite3.connect(DB_FILE)
-            c = conn.cursor()
-            c.execute('DELETE FROM checkins WHERE date = ? AND username = ?', (form_date.strftime('%Y-%m-%d'), st.session_state.username))
-            conn.commit()
-            conn.close()
-            st.info(f"Removed check-in for {form_date.strftime('%Y-%m-%d')}")
-        # An explicit st.rerun() is not needed here and can cause loops.
-        # Streamlit automatically reruns the script after a form submission.
+    with st.expander("User Settings"):
+        col_s1, col_s2 = st.columns(2)
+        with col_s1:
+            new_pass = st.text_input("New Password", type="password")
+            if st.button("Change Password"):
+                if new_pass:
+                    update_user_settings(st.session_state.username, password=new_pass)
+                    st.success("Password updated!")
+        with col_s2:
+            current_colors = get_user_colors()
+            my_color = st.color_picker("My Color", current_colors.get(st.session_state.username, "#888888"))
+            if st.button("Save Color"):
+                update_user_settings(st.session_state.username, color=my_color)
+                st.rerun()

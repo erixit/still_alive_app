@@ -1,0 +1,13 @@
+[Unit]
+Description=Still Alive Streamlit App
+After=network.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/development/repos/still_alive_app
+ExecStart=/home/pi/development/repos/still_alive_app/venv/bin/streamlit run app.py --server.port 8501 --server.address 0.0.0.0
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,1 @@
+UPDATE checkins SET username = 'erik' WHERE username = 'You';
